@@ -258,6 +258,14 @@ public:
     StandardPathFile openUser(Type type, const std::string &path,
                               int flags) const;
 
+    /**
+     * \brief Open the non-user file.
+     *
+     * \since 5.0.6
+     */
+    StandardPathFile openSystem(Type type, const std::string &path,
+                                int flags) const;
+
     /// \brief Open user file, but create file with mktemp.
     StandardPathTempFile openUserTemp(Type type,
                                       const std::string &pathOrig) const;
@@ -305,6 +313,8 @@ public:
         return multiOpenAllFilter(type, path, flags,
                                   filter::Chainer<Args...>(args...));
     }
+
+    int64_t timestamp(Type type, const std::string &path) const;
 
 private:
     std::unique_ptr<StandardPathPrivate> d_ptr;

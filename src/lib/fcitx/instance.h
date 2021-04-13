@@ -73,6 +73,18 @@ public:
     const InputMethodEntry *inputMethodEntry(InputContext *ic);
     InputMethodEngine *inputMethodEngine(InputContext *ic);
     InputMethodEngine *inputMethodEngine(const std::string &name);
+    /**
+     * Return the input method icon for input context.
+     *
+     * It will fallback to input-keyboard by default if no input method is
+     * available.
+     *
+     * @param ic input context
+     * @return icon name.
+     *
+     * @see InputMethodEngine::subModeIcon
+     */
+    std::string inputMethodIcon(InputContext *ic);
 
     /**
      * Handle current XCompose state.
@@ -115,6 +127,7 @@ public:
                          void(InputContext *inputContext, Text &orig));
     FCITX_DECLARE_SIGNAL(Instance, KeyEventResult,
                          void(const KeyEvent &keyEvent));
+    FCITX_DECLARE_SIGNAL(Instance, CheckUpdate, bool());
 
     /// Return a focused input context.
     InputContext *lastFocusedInputContext();
@@ -142,6 +155,10 @@ public:
     void reloadConfig();
     /// Reload certain addon config.
     void reloadAddonConfig(const std::string &addonName);
+    /// Load newly installed input methods and addons.
+    void refresh();
+
+    /// Return the current input method of last input context.
     std::string currentInputMethod();
     void setCurrentInputMethod(const std::string &imName);
     void setCurrentInputMethod(InputContext *ic, const std::string &imName,
@@ -156,6 +173,14 @@ public:
     void updateXkbStateMask(const std::string &display, uint32_t depressed_mods,
                             uint32_t latched_mods, uint32_t locked_mods);
     void showInputMethodInformation(InputContext *ic);
+
+    /**
+     * Check if need to invoke Instance::refresh.
+     *
+     * @return need update
+     * @see Instance::refresh
+     */
+    bool checkUpdate() const;
 
     static const char *version();
 

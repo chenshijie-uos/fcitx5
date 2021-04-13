@@ -23,7 +23,8 @@ set(FCITX_UTILS_TEST
     testlog
     testeventdispatcher
     testrect
-    testfallbackuuid)
+    testfallbackuuid
+    testsemver)
 
 set(FCITX_UTILS_DBUS_TEST
     testdbusmessage
@@ -84,7 +85,8 @@ set(FCITX_CORE_TEST
     testuserinterfacemanager
     testelement
     testcandidatelist
-    testicontheme)
+    testicontheme
+    testtext)
 foreach(TESTCASE ${FCITX_CORE_TEST})
     add_executable(${TESTCASE} ${TESTCASE}.cpp)
     target_link_libraries(${TESTCASE} Fcitx5::Core)

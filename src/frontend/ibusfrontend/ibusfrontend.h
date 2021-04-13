@@ -33,8 +33,9 @@ public:
 private:
     FCITX_ADDON_DEPENDENCY_LOADER(dbus, instance_->addonManager());
 
-    void replaceIBus();
-    void becomeIBus();
+    void replaceIBus(bool recheck);
+    void becomeIBus(bool recheck);
+    void ensureIsIBus();
 
     Instance *instance_;
     std::unique_ptr<dbus::Bus> portalBus_;
@@ -45,6 +46,7 @@ private:
     std::set<std::string> socketPaths_;
     std::string addressWrote_;
     pid_t pidWrote_;
+    int retry_ = 5;
 };
 } // namespace fcitx
 

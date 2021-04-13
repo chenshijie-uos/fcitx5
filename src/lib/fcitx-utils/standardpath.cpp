@@ -18,6 +18,7 @@
 #include <vector>
 #include "config.h"
 #include "fs.h"
+#include "mtime_p.h"
 #include "stringutils.h"
 
 namespace fcitx {
@@ -45,6 +46,14 @@ bool checkBoolEnvVar(const char *name) {
     }
     return value;
 }
+
+int64_t getTimestamp(const std::string &path) {
+    struct stat stats;
+    if (stat(path.c_str(), &stats) != 0) {
+        return 0;
+    }
+    return modifiedTime(stats).sec;
+};
 
 } // namespace
 
@@ -472,6 +481,35 @@ StandardPathFile StandardPath::openUser(Type type, const std::string &path,
     return {};
 }
 
+StandardPathFile StandardPath::openSystem(Type type, const std::string &path,
+                                          int flags) const {
+    int retFD = -1;
+    std::string fdPath;
+    if (isAbsolutePath(path)) {
+        int fd = ::open(path.c_str(), flags);
+        if (fd >= 0) {
+            retFD = fd;
+            fdPath = path;
+        }
+    } else {
+        scanDirectories(type, [flags, &retFD, &fdPath,
+                               &path](const std::string &dirPath, bool user) {
+            if (user) {
+                return true;
+            }
+            auto fullPath = constructPath(dirPath, path);
+            int fd = ::open(fullPath.c_str(), flags);
+            if (fd < 0) {
+                return true;
+            }
+            retFD = fd;
+            fdPath = fullPath;
+            return false;
+        });
+    }
+    return {retFD, fdPath};
+}
+
 std::vector<StandardPathFile> StandardPath::openAll(StandardPath::Type type,
                                                     const std::string &path,
                                                     int flags) const {
@@ -582,4 +620,20 @@ StandardPathFilesMap StandardPath::multiOpenAllFilter(
 
     return result;
 }
+
+int64_t StandardPath::timestamp(Type type, const std::string &path) const {
+    if (isAbsolutePath(path)) {
+        return getTimestamp(path);
+    }
+
+    int64_t timestamp = 0;
+    scanDirectories(type,
+                    [&timestamp, &path](const std::string &dirPath, bool) {
+                        auto fullPath = constructPath(dirPath, path);
+                        timestamp = std::max(timestamp, getTimestamp(fullPath));
+                        return true;
+                    });
+    return timestamp;
+}
+
 } // namespace fcitx

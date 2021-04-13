@@ -15,6 +15,7 @@
 #include "fcitx-utils/i18n.h"
 #include "fcitx/addonfactory.h"
 #include "fcitx/addonmanager.h"
+#include "fcitx/inputmethodengine.h"
 #include "fcitx/inputmethodentry.h"
 #include "dbusmenu.h"
 
@@ -71,9 +72,7 @@ public:
             icon = "input-keyboard";
         }
         if (auto *ic = parent_->instance()->lastFocusedInputContext()) {
-            if (const auto *entry = parent_->instance()->inputMethodEntry(ic)) {
-                icon = entry->icon();
-            }
+            icon = parent_->instance()->inputMethodIcon(ic);
         }
         if (icon == "input-keyboard" && preferSymbolic) {
             return "input-keyboard-symbolic";
@@ -115,23 +114,45 @@ public:
     FCITX_OBJECT_VTABLE_SIGNAL(newTitle, "NewTitle", "");
     FCITX_OBJECT_VTABLE_SIGNAL(xayatanaNewLabel, "XAyatanaNewLabel", "ss");
 
-    FCITX_OBJECT_VTABLE_PROPERTY(id, "Id", "s", []() { return "Fcitx"; });
     FCITX_OBJECT_VTABLE_PROPERTY(category, "Category", "s",
                                  []() { return "SystemServices"; });
-    FCITX_OBJECT_VTABLE_PROPERTY(status, "Status", "s",
-                                 []() { return "Active"; });
-    FCITX_OBJECT_VTABLE_PROPERTY(iconName, "IconName", "s",
-                                 [this]() { return iconName(); });
-    FCITX_OBJECT_VTABLE_PROPERTY(attentionIconName, "AttentionIconName", "s",
-                                 []() { return ""; });
+    FCITX_OBJECT_VTABLE_PROPERTY(id, "Id", "s", []() { return "Fcitx"; });
     FCITX_OBJECT_VTABLE_PROPERTY(title, "Title", "s",
                                  []() { return _("Input Method"); });
+    FCITX_OBJECT_VTABLE_PROPERTY(status, "Status", "s",
+                                 []() { return "Active"; });
+    FCITX_OBJECT_VTABLE_PROPERTY(windowId, "WindowId", "u", []() { return 0; });
+    FCITX_OBJECT_VTABLE_PROPERTY(iconName, "IconName", "s",
+                                 [this]() { return iconName(); });
+    FCITX_OBJECT_VTABLE_PROPERTY(
+        iconPixmap, "IconPixmap", "a(iiay)", ([]() {
+            return std::vector<
+                dbus::DBusStruct<int, int, std::vector<uint8_t>>>{};
+        }));
+    FCITX_OBJECT_VTABLE_PROPERTY(overlayIconName, "OverlayIconName", "s",
+                                 ([]() { return ""; }));
+    FCITX_OBJECT_VTABLE_PROPERTY(
+        overlayIconPixmap, "OverlayIconPixmap", "a(iiay)", ([]() {
+            return std::vector<
+                dbus::DBusStruct<int, int, std::vector<uint8_t>>>{};
+        }));
+    FCITX_OBJECT_VTABLE_PROPERTY(attentionIconName, "AttentionIconName", "s",
+                                 []() { return ""; });
+    FCITX_OBJECT_VTABLE_PROPERTY(
+        attentionIconPixmap, "AttentionIconPixmap", "a(iiay)", ([]() {
+            return std::vector<
+                dbus::DBusStruct<int, int, std::vector<uint8_t>>>{};
+        }));
+    FCITX_OBJECT_VTABLE_PROPERTY(attentionMovieName, "AttentionMovieName", "s",
+                                 []() { return ""; });
     FCITX_OBJECT_VTABLE_PROPERTY(tooltip, "ToolTip", "(sa(iiay)ss)",
                                  []() { return tooltip(); });
-    FCITX_OBJECT_VTABLE_PROPERTY(iconThemePath, "IconThemePath", "s",
-                                 []() { return ""; });
+    FCITX_OBJECT_VTABLE_PROPERTY(itemIsMenu, "ItemIsMenu", "b",
+                                 []() { return false; });
     FCITX_OBJECT_VTABLE_PROPERTY(menu, "Menu", "o",
                                  []() { return dbus::ObjectPath("/MenuBar"); });
+    FCITX_OBJECT_VTABLE_PROPERTY(iconThemePath, "IconThemePath", "s",
+                                 []() { return ""; });
     FCITX_OBJECT_VTABLE_PROPERTY(xayatanaLabel, "XAyatanaLabel", "s",
                                  [this]() { return label(); });
     FCITX_OBJECT_VTABLE_PROPERTY(XAyatanaLabelGuide, "XAyatanaLabelGuide", "s",
@@ -228,6 +249,14 @@ void NotificationItem::enable() {
         eventHandlers_.emplace_back(instance_->watchEvent(
             type, EventWatcherPhase::Default, updateIcon));
     }
+    eventHandlers_.emplace_back(instance_->watchEvent(
+        EventType::InputContextUpdateUI, EventWatcherPhase::Default,
+        [this](Event &event) {
+            if (static_cast<InputContextUpdateUIEvent &>(event).component() ==
+                UserInterfaceComponent::StatusArea) {
+                newIcon();
+            }
+        }));
 }
 
 void NotificationItem::disable() {

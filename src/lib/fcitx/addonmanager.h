@@ -11,6 +11,7 @@
 #include <string>
 #include <unordered_set>
 #include <fcitx-utils/macros.h>
+#include <fcitx-utils/semver.h>
 #include <fcitx/addoninfo.h>
 #include <fcitx/addonloader.h>
 #include "fcitxcore_export.h"
@@ -61,6 +62,7 @@ public:
      * built-in addons.
      */
     void registerDefaultLoader(StaticAddonRegistry *registry);
+
     /**
      * Register new addon loader.
      *
@@ -74,6 +76,7 @@ public:
      * @param name name of addon type.
      */
     void unregisterLoader(const std::string &name);
+
     /**
      * Load addon based on given parameter.
      *
@@ -91,6 +94,7 @@ public:
      */
     void load(const std::unordered_set<std::string> &enabled = {},
               const std::unordered_set<std::string> &disabled = {});
+
     /**
      * Destruct all addon, all information is cleared to the initial state.
      *
@@ -98,6 +102,7 @@ public:
      * the memory.
      */
     void unload();
+
     /**
      * Save all addon configuration.
      *
@@ -113,6 +118,7 @@ public:
      * @return instance of addon.
      */
     AddonInstance *addon(const std::string &name, bool load = false);
+
     /**
      * Get addon information for given addon.
      *
@@ -148,6 +154,18 @@ public:
      * @see fcitx::AddonManager::eventLoop
      */
     void setEventLoop(EventLoop *eventLoop);
+
+    /**
+     * Return the version number of Fcitx5Core library.
+     */
+    const SemanticVersion &version() const;
+
+    /**
+     * Check directory for quick hint for whether update is required.
+     *
+     * @since 5.0.6
+     */
+    bool checkUpdate() const;
 
 private:
     void setInstance(Instance *instance);

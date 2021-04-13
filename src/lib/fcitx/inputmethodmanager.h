@@ -57,6 +57,14 @@ public:
                    &buildDefaultGroupCallback = {});
 
     /**
+     * Load new input method configuration file from disk.
+     *
+     * It only load "new" input method configuration, and it would not update
+     * the loaded data. Should only be used after load is called.
+     */
+    void refresh();
+
+    /**
      * Save the input method information to disk.
      *
      * Commonly, the storage path will be ~/.config/fcitx5/profile.
@@ -121,6 +129,14 @@ public:
      */
     bool foreachEntries(
         const std::function<bool(const InputMethodEntry &entry)> &callback);
+
+    /**
+     * Check if there is new entries could be loaded.
+     *
+     * @return whether need to perform update.
+     * @see InputMethodManager::refresh
+     */
+    bool checkUpdate() const;
 
     /**
      * Emit the signal when current group is about to change.

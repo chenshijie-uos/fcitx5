@@ -70,10 +70,21 @@ public:
     }
 
     DependencyCheckStatus checkDependencies(const Addon &a) {
-        const auto &dependencies = a.info().dependencies();
-        for (const auto &dependency : dependencies) {
+        const auto &dependencies = a.info().dependenciesWithVersion();
+        for (const auto &[dependency, depVersion] : dependencies) {
+            if (dependency == "core") {
+                if (depVersion <= version_) {
+                    continue;
+                } else {
+                    return DependencyCheckStatus::Failed;
+                }
+            }
             Addon *dep = addon(dependency);
             if (!dep || !dep->isLoadable()) {
+                return DependencyCheckStatus::Failed;
+            }
+
+            if (depVersion > dep->info().version()) {
                 return DependencyCheckStatus::Failed;
             }
 
@@ -143,8 +154,9 @@ public:
         FCITX_DEBUG() << "Call loadAddon() with " << addon.info().uniqueName()
                       << " checkDependencies() returns "
                       << static_cast<int>(result)
-                      << " Dep: " << addon.info().dependencies()
-                      << " OptDep: " << addon.info().optionalDependencies();
+                      << " Dep: " << addon.info().dependenciesWithVersion()
+                      << " OptDep: "
+                      << addon.info().optionalDependenciesWithVersion();
         if (result == DependencyCheckStatus::Failed) {
             addon.setFailed();
         } else if (result == DependencyCheckStatus::Satisfied) {
@@ -191,6 +203,9 @@ public:
 
     Instance *instance_ = nullptr;
     EventLoop *eventLoop_ = nullptr;
+    int64_t timestamp_ = 0;
+    const SemanticVersion version_ =
+        SemanticVersion::parse(FCITX_VERSION_STRING).value();
 };
 
 AddonManager::AddonManager() : d_ptr(std::make_unique<AddonManagerPrivate>()) {}
@@ -227,12 +242,23 @@ void AddonManager::load(const std::unordered_set<std::string> &enabled,
                         const std::unordered_set<std::string> &disabled) {
     FCITX_D();
     const auto &path = StandardPath::global();
+    d->timestamp_ =
+        path.timestamp(StandardPath::Type::PkgData, d->addonConfigDir_);
     auto fileMap =
         path.multiOpenAll(StandardPath::Type::PkgData, d->addonConfigDir_,
                           O_RDONLY, filter::Suffix(".conf"));
     bool enableAll = enabled.count("all");
     bool disableAll = disabled.count("all");
     for (const auto &file : fileMap) {
+        // remove .conf
+        auto name = file.first.substr(0, file.first.size() - 5);
+        if (name == "core") {
+            FCITX_ERROR() << "\"core\" is not a valid addon name.";
+        }
+        if (d->addons_.count(name)) {
+            continue;
+        }
+
         const auto &files = file.second;
         RawConfig config;
         // reverse the order, so we end up parse user file at last.
@@ -242,8 +268,6 @@ void AddonManager::load(const std::unordered_set<std::string> &enabled,
             readFromIni(config, fd);
         }
 
-        // remove .conf
-        auto name = file.first.substr(0, file.first.size() - 5);
         // override configuration
         auto addon = std::make_unique<Addon>(name, config);
         if (addon->isValid()) {
@@ -346,4 +370,17 @@ EventLoop *AddonManager::eventLoop() {
     FCITX_D();
     return d->eventLoop_;
 }
+
+const SemanticVersion &AddonManager::version() const {
+    FCITX_D();
+    return d->version_;
+}
+
+bool AddonManager::checkUpdate() const {
+    FCITX_D();
+    auto timestamp = StandardPath::global().timestamp(
+        StandardPath::Type::PkgData, d->addonConfigDir_);
+    return timestamp > d->timestamp_;
+}
+
 } // namespace fcitx

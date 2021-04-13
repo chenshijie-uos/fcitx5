@@ -49,6 +49,22 @@ namespace fcitx {
 
 namespace {
 
+/// \brief Combiner that return the last value.
+class CheckUpdateResult {
+public:
+    template <typename InputIterator>
+    bool operator()(InputIterator begin, InputIterator end) {
+        bool v = false;
+        for (; begin != end; begin++) {
+            v = v || *begin;
+            if (v) {
+                break;
+            }
+        }
+        return v;
+    }
+};
+
 constexpr uint64_t AutoSavePeriod = 1800ull * 1000000ull; // 30 minutes
 constexpr uint64_t AutoSaveIdleTime = 60ull * 1000000ull; // 1 minutes
 
@@ -270,6 +286,7 @@ struct InstanceArgument {
 class InstancePrivate : public QPtrHolder<Instance> {
 public:
     InstancePrivate(Instance *q) : QPtrHolder<Instance>(q) {
+
         const char *locale = getenv("LC_ALL");
         if (!locale) {
             locale = getenv("LC_CTYPE");
@@ -365,11 +382,15 @@ public:
         std::string display;
         if (engine) {
             auto subMode = engine->subMode(*entry, *ic);
+            auto subModeLabel = engine->subModeLabel(*entry, *ic);
             auto name = globalConfig_.compactInputMethodInformation() &&
                                 !entry->label().empty()
                             ? entry->label()
                             : entry->name();
-            if (subMode.empty()) {
+            if (globalConfig_.compactInputMethodInformation() &&
+                !subModeLabel.empty()) {
+                display = subModeLabel;
+            } else if (subMode.empty()) {
                 display = name;
             } else {
                 display = fmt::format(_("{0} ({1})"), name, subMode);
@@ -434,6 +455,8 @@ public:
     FCITX_DEFINE_SIGNAL_PRIVATE(Instance, CommitFilter);
     FCITX_DEFINE_SIGNAL_PRIVATE(Instance, OutputFilter);
     FCITX_DEFINE_SIGNAL_PRIVATE(Instance, KeyEventResult);
+    FCITX_DEFINE_SIGNAL_PRIVATE_WITH_COMBINER(Instance, CheckUpdate,
+                                              CheckUpdateResult);
 
     FactoryFor<InputState> inputStateFactory_{
         [this](InputContext &ic) { return new InputState(this, &ic); }};
@@ -740,7 +763,8 @@ Instance::Instance(int argc, char **argv) {
                 d->icManager_.foreachFocused([this](InputContext *ic) {
                     assert(ic->hasFocus());
                     InputContextSwitchInputMethodEvent event(
-                        InputMethodSwitchedReason::GroupChange, "", ic);
+                        InputMethodSwitchedReason::GroupChange, inputMethod(ic),
+                        ic);
                     deactivateInputMethod(event);
                     return true;
                 });
@@ -789,7 +813,8 @@ Instance::Instance(int argc, char **argv) {
                 return;
             }
             InputContextSwitchInputMethodEvent switchIM(
-                InputMethodSwitchedReason::CapabilityChanged, "",
+                InputMethodSwitchedReason::CapabilityChanged,
+                inputMethod(capChanged.inputContext()),
                 capChanged.inputContext());
             deactivateInputMethod(switchIM);
         }));
@@ -872,22 +897,22 @@ Instance::Instance(int argc, char **argv) {
             // Keep these two values, and reset them in the state
             inputState->keyReleased_ = -1;
             inputState->lastKeyPressed_ = Key();
-            const bool isModifier = keyEvent.origKey().isModifier();
+            auto origKey = keyEvent.origKey().normalize();
+            const bool isModifier = origKey.isModifier();
             if (keyEvent.isRelease()) {
                 int idx = 0;
-                if (keyEvent.origKey().isModifier() &&
-                    Key::keySymToStates(keyEvent.origKey().sym()) ==
-                        keyEvent.origKey().states()) {
+                if (origKey.isModifier() &&
+                    (Key::keySymToStates(origKey.sym()) == origKey.states() ||
+                     origKey.states() == 0)) {
                     inputState->totallyReleased_ = true;
                 }
                 for (auto &keyHandler : keyHandlers) {
                     if (keyReleased == idx &&
-                        keyEvent.origKey().isReleaseOfModifier(
-                            lastKeyPressed) &&
+                        origKey.isReleaseOfModifier(lastKeyPressed) &&
                         keyHandler.check()) {
                         if (isModifier) {
                             keyHandler.trigger(inputState->totallyReleased_);
-                            if (keyEvent.origKey().hasModifier()) {
+                            if (origKey.hasModifier()) {
                                 inputState->totallyReleased_ = false;
                             }
                         }
@@ -900,18 +925,17 @@ Instance::Instance(int argc, char **argv) {
             if (!keyEvent.filtered() && !keyEvent.isRelease()) {
                 int idx = 0;
                 for (auto &keyHandler : keyHandlers) {
-                    auto keyIdx =
-                        keyEvent.origKey().keyListIndex(keyHandler.list);
+                    auto keyIdx = origKey.keyListIndex(keyHandler.list);
                     if (keyIdx >= 0 && keyHandler.check()) {
                         inputState->keyReleased_ = idx;
-                        inputState->lastKeyPressed_ = keyEvent.origKey();
+                        inputState->lastKeyPressed_ = origKey;
                         if (isModifier) {
                             // don't forward to input method, but make it pass
                             // through to client.
                             return keyEvent.filter();
                         }
                         keyHandler.trigger(inputState->totallyReleased_);
-                        if (keyEvent.origKey().hasModifier()) {
+                        if (origKey.hasModifier()) {
                             inputState->totallyReleased_ = false;
                         }
                         return keyEvent.filterAndAccept();
@@ -989,7 +1013,7 @@ Instance::Instance(int argc, char **argv) {
                 Key key(static_cast<KeySym>(newSym), newModifier, newCode);
                 FCITX_DEBUG()
                     << "Custom Xkb translated Key: " << key.toString();
-                keyEvent.setKey(key.normalize());
+                keyEvent.setRawKey(key);
             }
 #endif
 
@@ -1485,7 +1509,7 @@ bool Instance::postEvent(Event &event) {
                 // Re-forward the event to ensure we got delivered later than
                 // commit.
                 keyEvent.filterAndAccept();
-                ic->forwardKey(keyEvent.rawKey(), keyEvent.isRelease(),
+                ic->forwardKey(keyEvent.origKey(), keyEvent.isRelease(),
                                keyEvent.time());
             }
         }
@@ -1574,6 +1598,21 @@ InputMethodEngine *Instance::inputMethodEngine(const std::string &name) {
     }
     return static_cast<InputMethodEngine *>(
         d->addonManager_.addon(entry->addon(), true));
+}
+
+std::string Instance::inputMethodIcon(InputContext *ic) {
+    std::string icon = "input-keyboard";
+
+    const auto *entry = inputMethodEntry(ic);
+    auto *engine = inputMethodEngine(ic);
+
+    if (engine) {
+        icon = engine->subModeIcon(*entry, *ic);
+    }
+    if (icon.empty()) {
+        icon = entry->icon();
+    }
+    return icon;
 }
 
 uint32_t Instance::processCompose(InputContext *ic, KeySym keysym) {
@@ -1763,6 +1802,13 @@ void Instance::reloadAddonConfig(const std::string &addonName) {
     if (addon) {
         addon->reloadConfig();
     }
+}
+
+void Instance::refresh() {
+    FCITX_D();
+    auto [enabled, disabled] = d->overrideAddons();
+    d->addonManager_.load(enabled, disabled);
+    d->imManager_.refresh();
 }
 
 void Instance::reloadConfig() {
@@ -2143,6 +2189,7 @@ FocusGroup *Instance::defaultFocusGroup(const std::string &displayHint) {
 
 void Instance::activateInputMethod(InputContextEvent &event) {
     FCITX_D();
+    FCITX_DEBUG() << "Instance::activateInputMethod";
     InputContext *ic = event.inputContext();
     auto *inputState = ic->propertyFor(&d->inputStateFactory_);
     const auto *entry = inputMethodEntry(ic);
@@ -2180,6 +2227,8 @@ void Instance::activateInputMethod(InputContextEvent &event) {
 
 void Instance::deactivateInputMethod(InputContextEvent &event) {
     FCITX_D();
+    FCITX_DEBUG() << "Instance::deactivateInputMethod event_type="
+                  << static_cast<uint32_t>(event.type());
     InputContext *ic = event.inputContext();
     auto *inputState = ic->propertyFor(&d->inputStateFactory_);
     const InputMethodEntry *entry = nullptr;
@@ -2188,6 +2237,9 @@ void Instance::deactivateInputMethod(InputContextEvent &event) {
     if (event.type() == EventType::InputContextSwitchInputMethod) {
         auto &icEvent =
             static_cast<InputContextSwitchInputMethodEvent &>(event);
+        FCITX_DEBUG() << "Switch reason: "
+                      << static_cast<int>(icEvent.reason());
+        FCITX_DEBUG() << "Old Input method: " << icEvent.oldInputMethod();
         entry = d->imManager_.entry(icEvent.oldInputMethod());
     } else {
         entry = inputMethodEntry(ic);
@@ -2231,6 +2283,12 @@ void Instance::showInputMethodInformation(InputContext *ic) {
         return;
     }
     d->showInputMethodInformation(ic);
+}
+
+bool Instance::checkUpdate() const {
+    FCITX_D();
+    return d->addonManager_.checkUpdate() || d->imManager_.checkUpdate() ||
+           emit<Instance::CheckUpdate>();
 }
 
 void Instance::setXkbParameters(const std::string &display,
